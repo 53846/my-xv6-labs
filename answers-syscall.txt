@@ -1,0 +1,6 @@
+usertrap
+7 SYS_exec
+user mode
+lw	s2,0(zero) s2
+load pagee fault
+initcode\000\000\000\000\000\000\000
