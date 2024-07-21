@@ -1,0 +1,6 @@
+a0-7, a2;
+There is none. `g()` is inlined in `f()` and `f()` is inlined in `main()`;
+0x642;
+0x38;
+HE110 World, 0x00726c64, no need;
+1, that is the value in a2 before this `printf()`.
