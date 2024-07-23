@@ -37,6 +37,7 @@ void
 usertrap(void)
 {
   int which_dev = 0;
+  uint64 scause; 
 
   if((r_sstatus() & SSTATUS_SPP) != 0)
     panic("usertrap: not from user mode");
@@ -50,7 +51,8 @@ usertrap(void)
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
-  if(r_scause() == 8){
+  scause = r_scause();
+  if(scause == 8){
     // system call
 
     if(killed(p))
@@ -65,6 +67,34 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if(scause == 13){
+    // read page fault
+    setkilled(p);
+  } else if(scause == 15){
+    // write page fault
+
+    if(r_stval() >= MAXVA){
+      setkilled(p);
+      exit(-1);
+    }
+
+    pagetable_t pagetable = p->pagetable;
+    uint64 va = r_stval();
+    pte_t *pte = walk(pagetable, va, 0);
+    char *mem;
+    if(pte == 0)
+      panic("page fault: pte should exist");
+    if((*pte & PTE_V) == 0)
+      panic("page fault: page not present");
+    
+    if((*pte & PTE_COW) == 0 || (mem = kalloc()) == 0){
+      setkilled(p);
+    } else{
+      uint64 pa = PTE2PA(*pte);
+      memmove(mem, (char*)pa, PGSIZE);
+      kfree((char *)pa);
+      *pte = PA2PTE(mem) | ((PTE_FLAGS(*pte) & ~PTE_COW) | PTE_W);
+    }
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
