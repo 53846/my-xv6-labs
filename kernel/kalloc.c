@@ -21,12 +21,19 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
-} kmem;
+} kmem[NCPU];
+
+struct spinlock steal_lock;
 
 void
 kinit()
 {
-  initlock(&kmem.lock, "kmem");
+  char buffer[20];
+  initlock(&steal_lock, "steal_kmem");
+  for(int i = 0; i < NCPU; i++) {
+    snprintf(buffer, sizeof(buffer), "kmem_cpu%d", i);
+    initlock(&kmem[i].lock, buffer);
+  }
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -46,6 +53,7 @@ freerange(void *pa_start, void *pa_end)
 void
 kfree(void *pa)
 {
+  int hart;
   struct run *r;
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
@@ -56,10 +64,13 @@ kfree(void *pa)
 
   r = (struct run*)pa;
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+  push_off();
+  hart = cpuid();
+  acquire(&kmem[hart].lock);
+  r->next = kmem[hart].freelist;
+  kmem[hart].freelist = r;
+  release(&kmem[hart].lock);
+  pop_off();
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -68,13 +79,37 @@ kfree(void *pa)
 void *
 kalloc(void)
 {
+  int hart;
   struct run *r;
 
-  acquire(&kmem.lock);
-  r = kmem.freelist;
+  push_off();
+  hart = cpuid();
+  acquire(&kmem[hart].lock);
+  if(!kmem[hart].freelist) {
+    acquire(&steal_lock);
+    int steal_count = 32;
+    for(int i = 0; i < NCPU && steal_count; i++) {
+      if(i == hart) {
+        continue;
+      }
+      acquire(&kmem[i].lock);
+      while(kmem[i].freelist && steal_count) {
+        struct run *temp = kmem[i].freelist->next;
+        kmem[i].freelist->next = kmem[hart].freelist;
+        kmem[hart].freelist = kmem[i].freelist;
+        kmem[i].freelist = temp;
+        steal_count--;
+      }
+      release(&kmem[i].lock);
+    }
+    release(&steal_lock);
+  }
+
+  r = kmem[hart].freelist;
   if(r)
-    kmem.freelist = r->next;
-  release(&kmem.lock);
+    kmem[hart].freelist = r->next;
+  release(&kmem[hart].lock);
+  pop_off();
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
