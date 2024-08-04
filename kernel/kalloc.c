@@ -20,19 +20,37 @@ struct run {
 
 struct {
   struct spinlock lock;
+  struct spinlock steal_lock;
   struct run *freelist;
 } kmem[NCPU];
 
-struct spinlock steal_lock;
+char *lname[] = {
+  "kmem_cpu0",
+  "kmem_cpu1",
+  "kmem_cpu2",
+  "kmem_cpu3",
+  "kmem_cpu4",
+  "kmem_cpu5",
+  "kmem_cpu6",
+  "kmem_cpu7",
+};
+char *stlname[] = {
+  "kmem_cpu0_steal",
+  "kmem_cpu1_steal",
+  "kmem_cpu2_steal",
+  "kmem_cpu3_steal",
+  "kmem_cpu4_steal",
+  "kmem_cpu5_steal",
+  "kmem_cpu6_steal",
+  "kmem_cpu7_steal",
+};
 
 void
 kinit()
 {
-  char buffer[20];
-  initlock(&steal_lock, "steal_kmem");
   for(int i = 0; i < NCPU; i++) {
-    snprintf(buffer, sizeof(buffer), "kmem_cpu%d", i);
-    initlock(&kmem[i].lock, buffer);
+    initlock(&kmem[i].lock, lname[i]);
+    initlock(&kmem[i].steal_lock, stlname[i]);
   }
   freerange(end, (void*)PHYSTOP);
 }
@@ -86,7 +104,10 @@ kalloc(void)
   hart = cpuid();
   acquire(&kmem[hart].lock);
   if(!kmem[hart].freelist) {
-    acquire(&steal_lock);
+    acquire(&kmem[hart].steal_lock);
+    release(&kmem[hart].lock);
+    // since cpu[hart] turns interrupts off, there will be no
+    // modification of kmem[hart] until steal been finished.
     int steal_count = 32;
     for(int i = 0; i < NCPU && steal_count; i++) {
       if(i == hart) {
@@ -102,7 +123,8 @@ kalloc(void)
       }
       release(&kmem[i].lock);
     }
-    release(&steal_lock);
+    acquire(&kmem[hart].lock);
+    release(&kmem[hart].steal_lock);
   }
 
   r = kmem[hart].freelist;
