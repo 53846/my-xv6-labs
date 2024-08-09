@@ -5,6 +5,11 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "sleeplock.h"
+#include "proc.h"
+#include "file.h"
+#include "fcntl.h"
 
 /*
  * the kernel's page table.
@@ -447,5 +452,40 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return 0;
   } else {
     return -1;
+  }
+}
+
+void
+vmaunmap(pagetable_t pagetable, uint64 va, uint64 length, struct vma* v)
+{
+  uint64 a;
+  pte_t *pte;
+
+  uint64 addr_begin = PGROUNDDOWN(va);
+
+  for(a = addr_begin; a < va + length; a += PGSIZE){
+    if((pte = walk(pagetable, a, 0)) == 0)
+      continue;
+    if(PTE_FLAGS(*pte) == PTE_V)
+      panic("vmaunmap: not a leaf");
+    if(*pte & PTE_V){
+      uint64 pa = PTE2PA(*pte);
+      if((*pte & PTE_D) && (v->flags == MAP_SHARED)){
+        begin_op();
+        ilock(v->f->ip);
+        long offset = a - v->addr;
+        if(offset < 0){
+          writei(v->f->ip, 0, pa - offset, v->offset, PGSIZE + offset);
+        } else if(offset + PGSIZE > v->length){
+          writei(v->f->ip, 0, pa, v->offset + offset, v->length - offset);
+        } else {
+          writei(v->f->ip, 0, pa, v->offset + offset, PGSIZE);
+        }
+        iunlock(v->f->ip);
+        end_op();
+      }
+      kfree((void*)pa);
+      *pte = 0;
+    }
   }
 }

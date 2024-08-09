@@ -12,6 +12,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+struct vma;
 #ifdef LAB_NET
 struct mbuf;
 struct sock;
@@ -187,6 +188,7 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+void            vmaunmap(pagetable_t, uint64, uint64, struct vma*);
 
 // plic.c
 void            plicinit(void);
@@ -244,3 +246,6 @@ int             sockread(struct sock *, uint64, int);
 int             sockwrite(struct sock *, uint64, int);
 void            sockrecvudp(struct mbuf*, uint32, uint16, uint16);
 #endif
+
+// sysfile.c
+int             vmalazymap(uint64);
